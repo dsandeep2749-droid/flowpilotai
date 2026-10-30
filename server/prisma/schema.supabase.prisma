@@ -1,0 +1,237 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id                 String            @id @default(uuid())
+  email              String            @unique
+  passwordHash       String
+  name               String
+  role               String            @default("OPERATOR") // ADMIN, MANAGER, OPERATOR
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  workflows          Workflow[]
+  approvals          ApprovalRequest[] @relation("ApproverUser")
+  requestedApprovals ApprovalRequest[] @relation("RequesterUser")
+  auditEvents        AuditEvent[]
+  notifications      Notification[]
+}
+
+model Product {
+  id              String           @id @default(uuid())
+  sku             String           @unique
+  name            String
+  description     String?
+  unitPrice       Float
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  inventoryItem   InventoryItem?
+  orders          Order[]
+  restockRequests RestockRequest[]
+}
+
+model InventoryItem {
+  id                String    @id @default(uuid())
+  productId         String    @unique
+  product           Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  availableQuantity Int       @default(0)
+  reservedQuantity  Int       @default(0)
+  reorderThreshold  Int       @default(10)
+  reorderQuantity   Int       @default(50)
+  supplierName      String
+  supplierContact   String?
+  lastRestockedAt   DateTime?
+  updatedAt         DateTime  @updatedAt
+}
+
+model Order {
+  id                     String                   @id @default(uuid())
+  orderNumber            String                   @unique
+  customerName           String
+  customerEmail          String
+  productId              String
+  product                Product                  @relation(fields: [productId], references: [id])
+  quantity               Int
+  totalAmount            Float
+  orderDate              DateTime                 @default(now())
+  expectedDeliveryDate   DateTime
+  priority               String                   @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  status                 String                   @default("PENDING") // PENDING, PROCESSING, DELAYED, RESOLVED, CANCELLED
+  delayReason            String?
+  delayDays              Int                      @default(0)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  shipment               Shipment?
+  shipmentInvestigations ShipmentInvestigation[]
+}
+
+model Shipment {
+  id                String    @id @default(uuid())
+  orderId           String    @unique
+  order             Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  trackingNumber    String?   @unique
+  carrier           String    @default("Internal Fleet")
+  status            String    @default("PENDING") // PENDING, DISPATCHED, IN_TRANSIT, DELAYED, EXCEPTION, DELIVERED
+  origin            String    @default("Central Distribution Hub")
+  destination       String
+  estimatedDelivery DateTime?
+  dispatchedAt      DateTime?
+  notes             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+model Workflow {
+  id             String            @id @default(uuid())
+  title          String
+  objective      String
+  workflowType   String            @default("ORDER_DELAY_RESOLUTION")
+  executionMode  String            @default("ASSISTED") // PLAN_ONLY, ASSISTED, AUTHORIZED_AUTOMATION
+  status         String            @default("DRAFT")
+  creatorId      String?
+  creator        User?             @relation(fields: [creatorId], references: [id], onDelete: SetNull)
+  planSummary    String?
+  proposedPlan   String? // JSON string
+  finalSummary   String?
+  failureReason  String?
+  isDemoMode     Boolean           @default(false)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  steps          WorkflowStep[]
+  approvals      ApprovalRequest[]
+  toolExecutions ToolExecution[]
+  auditEvents    AuditEvent[]
+}
+
+model WorkflowStep {
+  id                   String            @id @default(uuid())
+  workflowId           String
+  workflow             Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  sequence             Int
+  stepType             String
+  description          String
+  status               String            @default("PENDING")
+  toolName             String?
+  inputParams          String?
+  outputData           String?
+  retryCount           Int               @default(0)
+  maxRetries           Int               @default(3)
+  verificationStatus   String            @default("UNVERIFIED")
+  verificationEvidence String?
+  errorMessage         String?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  toolExecutions       ToolExecution[]
+  approvalRequests     ApprovalRequest[]
+}
+
+model ToolExecution {
+  id                  String        @id @default(uuid())
+  workflowId          String
+  workflow            Workflow      @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  stepId              String?
+  step                WorkflowStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  toolName            String
+  inputData           String?
+  outputData          String?
+  status              String
+  idempotencyKey      String?       @unique
+  executedBy          String?
+  executionDurationMs Int           @default(0)
+  createdAt           DateTime      @default(now())
+}
+
+model ApprovalRequest {
+  id               String        @id @default(uuid())
+  workflowId       String
+  workflow         Workflow      @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  stepId           String?
+  step             WorkflowStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  actionType       String
+  targetEntityType String
+  targetEntityId   String
+  actionParams     String
+  reason           String
+  expectedImpact   String
+  riskLevel        String        @default("MEDIUM")
+  status           String        @default("PENDING")
+  requesterId      String?
+  requester        User?         @relation("RequesterUser", fields: [requesterId], references: [id], onDelete: SetNull)
+  approverId       String?
+  approver         User?         @relation("ApproverUser", fields: [approverId], references: [id], onDelete: SetNull)
+  approverRole     String        @default("MANAGER")
+  decisionComment  String?
+  decisionAt       DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+}
+
+model AuditEvent {
+  id         String    @id @default(uuid())
+  eventType  String
+  actorId    String?
+  actorEmail String?
+  actorRole  String?
+  user       User?     @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  workflowId String?
+  workflow   Workflow? @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  entityType String?
+  entityId   String?
+  outcome    String    @default("SUCCESS")
+  details    String?
+  ipAddress  String?
+  createdAt  DateTime  @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String   @default("INFO")
+  isRead    Boolean  @default(false)
+  linkUrl   String?
+  createdAt DateTime @default(now())
+}
+
+model RestockRequest {
+  id          String   @id @default(uuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity    Int
+  reason      String
+  status      String   @default("REQUESTED")
+  requestedBy String   @default("FlowPilot Agent")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ShipmentInvestigation {
+  id        String   @id @default(uuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  issueType String
+  priority  String   @default("MEDIUM")
+  status    String   @default("OPEN")
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
