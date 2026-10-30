@@ -264,3 +264,4 @@ CREATE POLICY "Allow service role all on Orders" ON "Order" FOR ALL USING (true)
 CREATE POLICY "Allow service role all on Products" ON "Product" FOR ALL USING (true);
 CREATE POLICY "Allow service role all on Workflows" ON "Workflow" FOR ALL USING (true);
 
+
